@@ -109,7 +109,6 @@ export const formatCurrency = (amount) => {
   }).format(amount)
 }
 
-// Helper function to generate folio
 export const generateFolio = (lastFolio) => {
   if (!lastFolio) return 'VTA-00001'
   const num = parseInt(lastFolio.split('-')[1]) + 1

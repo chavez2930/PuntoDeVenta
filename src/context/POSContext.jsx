@@ -1,16 +1,23 @@
 import { createContext, useContext, useReducer, useEffect } from 'react'
+import { 
+  getProducts, getSales, getCategories, getUsers, 
+  createProduct, updateProduct as apiUpdateProduct, deleteProduct as apiDeleteProduct,
+  createCategory, updateCategory as apiUpdateCategory, deleteCategory as apiDeleteCategory,
+  completeSale as apiCompleteSale
+} from '../utils/api';
+import { USE_MOCK_DATA } from '../config';
 import {
-  roles as initialRoles,
-  usuarios as initialUsuarios,
-  categorias as initialCategorias,
-  productos as initialProductos,
-  metodosPago as initialMetodosPago,
-  ventas as initialVentas,
-  detalleVenta as initialDetalleVenta,
-  ventasPagos as initialVentasPagos,
-  movimientosInventario as initialMovimientos,
+  roles as mockRoles,
+  usuarios as mockUsuarios,
+  categorias as mockCategorias,
+  productos as mockProductos,
+  metodosPago as mockMetodosPago,
+  ventas as mockVentas,
+  detalleVenta as mockDetalleVenta,
+  ventasPagos as mockVentasPagos,
+  movimientosInventario as mockMovimientos,
   generateFolio
-} from '../data/mockData'
+} from '../data/mockData';
 
 const POSContext = createContext(null)
 
@@ -28,22 +35,22 @@ const initialState = {
   mobileMenuOpen: false,
 
   // Data
-  roles: initialRoles,
-  usuarios: initialUsuarios,
-  categorias: initialCategorias,
-  productos: initialProductos,
-  metodosPago: initialMetodosPago,
-  ventas: initialVentas,
-  detalleVenta: initialDetalleVenta,
-  ventasPagos: initialVentasPagos,
-  movimientosInventario: initialMovimientos,
+  roles: [],
+  usuarios: [],
+  categorias: [],
+  productos: [],
+  metodosPago: [],
+  ventas: [],
+  detalleVenta: [],
+  ventasPagos: [],
+  movimientosInventario: [],
 
   // Cart
   cart: [],
   cartDiscount: 0,
 
   // UI
-  loading: false,
+  loading: true, // Start with loading true
   toasts: [],
 
   // Modals
@@ -53,6 +60,20 @@ const initialState = {
 
 function posReducer(state, action) {
   switch (action.type) {
+    case 'SET_INITIAL_DATA':
+      return {
+        ...state,
+        productos: action.payload.products,
+        ventas: action.payload.sales,
+        categorias: action.payload.categories,
+        usuarios: action.payload.users,
+        roles: action.payload.roles,
+        metodosPago: action.payload.paymentMethods,
+        detalleVenta: action.payload.saleDetails,
+        ventasPagos: action.payload.salePayments,
+        movimientosInventario: action.payload.inventoryMovements,
+        loading: false,
+      };
     // Auth
     case 'LOGIN':
       return { ...state, user: action.payload, isAuthenticated: true, activeView: 'caja' }
@@ -111,7 +132,7 @@ function posReducer(state, action) {
 
     // Products
     case 'ADD_PRODUCT':
-      return { ...state, productos: [...state.productos, { ...action.payload, id: Math.max(...state.productos.map(p => p.id)) + 1 }] }
+      return { ...state, productos: [...state.productos, action.payload] }
     case 'UPDATE_PRODUCT':
       return { ...state, productos: state.productos.map(p => p.id === action.payload.id ? action.payload : p) }
     case 'DELETE_PRODUCT':
@@ -119,7 +140,7 @@ function posReducer(state, action) {
 
     // Categories
     case 'ADD_CATEGORY':
-      return { ...state, categorias: [...state.categorias, { ...action.payload, id: Math.max(...state.categorias.map(c => c.id)) + 1 }] }
+      return { ...state, categorias: [...state.categorias, action.payload] }
     case 'UPDATE_CATEGORY':
       return { ...state, categorias: state.categorias.map(c => c.id === action.payload.id ? action.payload : c) }
     case 'DELETE_CATEGORY':
@@ -127,7 +148,7 @@ function posReducer(state, action) {
 
     // Users
     case 'ADD_USER':
-      return { ...state, usuarios: [...state.usuarios, { ...action.payload, id: Math.max(...state.usuarios.map(u => u.id)) + 1 }] }
+      return { ...state, usuarios: [...state.usuarios, action.payload] }
     case 'UPDATE_USER':
       return { ...state, usuarios: state.usuarios.map(u => u.id === action.payload.id ? action.payload : u) }
     case 'DELETE_USER':
@@ -135,110 +156,25 @@ function posReducer(state, action) {
 
     // Payment Methods
     case 'ADD_PAYMENT_METHOD':
-      return { ...state, metodosPago: [...state.metodosPago, { ...action.payload, id: Math.max(...state.metodosPago.map(m => m.id)) + 1 }] }
+      return { ...state, metodosPago: [...state.metodosPago, action.payload] }
     case 'UPDATE_PAYMENT_METHOD':
       return { ...state, metodosPago: state.metodosPago.map(m => m.id === action.payload.id ? action.payload : m) }
     case 'DELETE_PAYMENT_METHOD':
       return { ...state, metodosPago: state.metodosPago.filter(m => m.id !== action.payload) }
 
     // Sales
-    case 'COMPLETE_SALE': {
-      const { sale, details, payments, stockUpdates, movements } = action.payload
-      const newVenta = { ...sale, id: Math.max(0, ...state.ventas.map(v => v.id)) + 1 }
-      const newDetails = details.map((d, i) => ({
-        ...d,
-        id: Math.max(0, ...state.detalleVenta.map(dv => dv.id)) + 1 + i,
-        venta_id: newVenta.id
-      }))
-      const newPayments = payments.map((p, i) => ({
-        ...p,
-        id: Math.max(0, ...state.ventasPagos.map(vp => vp.id)) + 1 + i,
-        venta_id: newVenta.id
-      }))
-      const newMovements = movements.map((m, i) => ({
-        ...m,
-        id: Math.max(0, ...state.movimientosInventario.map(mv => mv.id)) + 1 + i
-      }))
-      const updatedProductos = state.productos.map(p => {
-        const update = stockUpdates.find(u => u.producto_id === p.id)
-        return update ? { ...p, stock: p.stock - update.cantidad } : p
-      })
+    case 'SALE_SUCCESS': {
+      const { newSale, updatedProducts } = action.payload;
       return {
         ...state,
-        ventas: [...state.ventas, newVenta],
-        detalleVenta: [...state.detalleVenta, ...newDetails],
-        ventasPagos: [...state.ventasPagos, ...newPayments],
-        movimientosInventario: [...state.movimientosInventario, ...newMovements],
-        productos: updatedProductos,
+        ventas: [...state.ventas, newSale],
+        productos: state.productos.map(p => {
+          const update = updatedProducts.find(u => u.id === p.id);
+          return update ? update : p;
+        }),
         cart: [],
-        cartDiscount: 0
-      }
-    }
-
-    case 'CANCEL_SALE': {
-      const venta = state.ventas.find(v => v.id === action.payload)
-      if (!venta) return state
-      const details = state.detalleVenta.filter(d => d.venta_id === action.payload)
-      const updatedProductos = state.productos.map(p => {
-        const detail = details.find(d => d.producto_id === p.id)
-        return detail ? { ...p, stock: p.stock + detail.cantidad } : p
-      })
-      return {
-        ...state,
-        ventas: state.ventas.map(v => v.id === action.payload ? { ...v, estado: 'cancelada' } : v),
-        productos: updatedProductos
-      }
-    }
-
-    case 'RETURN_SALE': {
-      const venta = state.ventas.find(v => v.id === action.payload)
-      if (!venta) return state
-      const details = state.detalleVenta.filter(d => d.venta_id === action.payload)
-      const updatedProductos = state.productos.map(p => {
-        const detail = details.find(d => d.producto_id === p.id)
-        return detail ? { ...p, stock: p.stock + detail.cantidad } : p
-      })
-      const newMovements = details.map((d, i) => ({
-        id: Math.max(0, ...state.movimientosInventario.map(m => m.id)) + 1 + i,
-        producto_id: d.producto_id,
-        tipo: 'devolucion',
-        cantidad: d.cantidad,
-        fecha: new Date().toISOString(),
-        usuario_id: state.user?.id || 1,
-        notas: `Devolución ${venta.folio}`
-      }))
-      return {
-        ...state,
-        ventas: state.ventas.map(v => v.id === action.payload ? { ...v, estado: 'devuelta' } : v),
-        productos: updatedProductos,
-        movimientosInventario: [...state.movimientosInventario, ...newMovements]
-      }
-    }
-
-    // Inventory
-    case 'ADJUST_STOCK': {
-      const { producto_id, cantidad, tipo, notas } = action.payload
-      const newMovement = {
-        id: Math.max(0, ...state.movimientosInventario.map(m => m.id)) + 1,
-        producto_id,
-        tipo,
-        cantidad: tipo === 'entrada' ? cantidad : -cantidad,
-        fecha: new Date().toISOString(),
-        usuario_id: state.user?.id || 1,
-        notas
-      }
-      const updatedProductos = state.productos.map(p => {
-        if (p.id === producto_id) {
-          const newStock = tipo === 'entrada' ? p.stock + cantidad : p.stock - cantidad
-          return { ...p, stock: Math.max(0, newStock) }
-        }
-        return p
-      })
-      return {
-        ...state,
-        productos: updatedProductos,
-        movimientosInventario: [...state.movimientosInventario, newMovement]
-      }
+        cartDiscount: 0,
+      };
     }
 
     // UI
@@ -261,6 +197,43 @@ function posReducer(state, action) {
 export function POSProvider({ children }) {
   const [state, dispatch] = useReducer(posReducer, initialState)
 
+  useEffect(() => {
+    async function loadInitialData() {
+      if (USE_MOCK_DATA) {
+        dispatch({
+          type: 'SET_INITIAL_DATA',
+          payload: {
+            products: mockProductos,
+            sales: mockVentas,
+            categories: mockCategorias,
+            users: mockUsuarios,
+            roles: mockRoles,
+            paymentMethods: mockMetodosPago,
+            saleDetails: mockDetalleVenta,
+            salePayments: mockVentasPagos,
+            inventoryMovements: mockMovimientos,
+          }
+        });
+        return;
+      }
+
+      try {
+        const [products, sales, categories, users] = await Promise.all([
+          getProducts(),
+          getSales(),
+          getCategories(),
+          getUsers(),
+        ]);
+        dispatch({ type: 'SET_INITIAL_DATA', payload: { products, sales, categories, users, roles: [], paymentMethods: [], saleDetails: [], salePayments: [], inventoryMovements: [] } });
+      } catch (error) {
+        dispatch({ type: 'ADD_TOAST', payload: { message: 'Error fetching initial data', type: 'error' } });
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    }
+    loadInitialData();
+  }, []);
+
+
   // Auto-remove toasts
   useEffect(() => {
     if (state.toasts.length > 0) {
@@ -270,6 +243,145 @@ export function POSProvider({ children }) {
       return () => clearTimeout(timer)
     }
   }, [state.toasts])
+
+  const addProduct = async (productData) => {
+    if (USE_MOCK_DATA) {
+      const newProduct = { ...productData, id: Date.now(), stock_actual: productData.stock };
+      dispatch({ type: 'ADD_PRODUCT', payload: newProduct });
+      return;
+    }
+    const tempId = Date.now();
+    const newProduct = { ...productData, id: tempId, stock_actual: productData.stock };
+    dispatch({ type: 'ADD_PRODUCT', payload: newProduct });
+    try {
+      const savedProduct = await createProduct(productData);
+      dispatch({ type: 'UPDATE_PRODUCT', payload: { ...savedProduct, id: tempId } });
+    } catch (error) {
+      dispatch({ type: 'DELETE_PRODUCT', payload: tempId });
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error adding product', type: 'error' } });
+    }
+  };
+
+  const updateProduct = async (productId, productData) => {
+    if (USE_MOCK_DATA) {
+      dispatch({ type: 'UPDATE_PRODUCT', payload: { ...productData, id: productId } });
+      return;
+    }
+    const originalProduct = state.productos.find(p => p.id === productId);
+    dispatch({ type: 'UPDATE_PRODUCT', payload: { ...productData, id: productId } });
+    try {
+      await apiUpdateProduct(productId, productData);
+    } catch (error) {
+      dispatch({ type: 'UPDATE_PRODUCT', payload: originalProduct });
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error updating product', type: 'error' } });
+    }
+  };
+
+  const deleteProduct = async (productId) => {
+    if (USE_MOCK_DATA) {
+      dispatch({ type: 'DELETE_PRODUCT', payload: productId });
+      return;
+    }
+    const originalProducts = state.productos;
+    dispatch({ type: 'DELETE_PRODUCT', payload: productId });
+    try {
+      await apiDeleteProduct(productId);
+    } catch (error) {
+      dispatch({ type: 'SET_INITIAL_DATA', payload: { ...state, productos: originalProducts } });
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error deleting product', type: 'error' } });
+    }
+  };
+
+  const addCategory = async (categoryData) => {
+    if (USE_MOCK_DATA) {
+      const newCategory = { ...categoryData, id: Date.now() };
+      dispatch({ type: 'ADD_CATEGORY', payload: newCategory });
+      return;
+    }
+    const tempId = Date.now();
+    const newCategory = { ...categoryData, id: tempId };
+    dispatch({ type: 'ADD_CATEGORY', payload: newCategory });
+    try {
+      const savedCategory = await createCategory(categoryData);
+      dispatch({ type: 'UPDATE_CATEGORY', payload: { ...savedCategory, id: tempId } });
+    } catch (error) {
+      dispatch({ type: 'DELETE_CATEGORY', payload: tempId });
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error adding category', type: 'error' } });
+    }
+  };
+
+  const updateCategory = async (categoryId, categoryData) => {
+    if (USE_MOCK_DATA) {
+      dispatch({ type: 'UPDATE_CATEGORY', payload: { ...categoryData, id: categoryId } });
+      return;
+    }
+    const originalCategory = state.categorias.find(c => c.id === categoryId);
+    dispatch({ type: 'UPDATE_CATEGORY', payload: { ...categoryData, id: categoryId } });
+    try {
+      await apiUpdateCategory(categoryId, categoryData);
+    } catch (error) {
+      dispatch({ type: 'UPDATE_CATEGORY', payload: originalCategory });
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error updating category', type: 'error' } });
+    }
+  };
+
+  const deleteCategory = async (categoryId) => {
+    if (USE_MOCK_DATA) {
+      dispatch({ type: 'DELETE_CATEGORY', payload: categoryId });
+      return;
+    }
+    const originalCategories = state.categorias;
+    dispatch({ type: 'DELETE_CATEGORY', payload: categoryId });
+    try {
+      await apiDeleteCategory(categoryId);
+    } catch (error) {
+      dispatch({ type: 'SET_INITIAL_DATA', payload: { ...state, categorias: originalCategories } });
+      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error deleting category', type: 'error' } });
+    }
+  };
+
+  const completeSale = async (saleData) => {
+    if (USE_MOCK_DATA) {
+      const { cart, cartDiscount, user, getCartTotals, getNextFolio } = saleData;
+      const totals = getCartTotals();
+      const newSale = {
+        id: Math.max(0, ...state.ventas.map(v => v.id)) + 1,
+        folio: getNextFolio(),
+        usuario_id: user.id,
+        subtotal: totals.subtotal,
+        descuento: cartDiscount,
+        impuestos: totals.impuestos,
+        total: totals.total,
+        estado: 'completada',
+        creado_en: new Date().toISOString(),
+      };
+      const updatedProducts = state.productos.map(p => {
+        const cartItem = cart.find(item => item.producto_id === p.id);
+        if (cartItem) {
+          return { ...p, stock: p.stock - cartItem.cantidad };
+        }
+        return p;
+      });
+      dispatch({ type: 'SALE_SUCCESS', payload: { newSale, updatedProducts } });
+      addToast('Sale completed successfully!', 'success');
+      return;
+    }
+
+    try {
+      const result = await apiCompleteSale(saleData);
+      if (result.success) {
+        // Refetch products and sales to get the latest data
+        const [products, sales] = await Promise.all([getProducts(), getSales()]);
+        dispatch({ type: 'SET_INITIAL_DATA', payload: { ...state, products, sales } });
+        dispatch({ type: 'CLEAR_CART' });
+        addToast('Sale completed successfully!', 'success');
+      } else {
+        throw new Error(result.error || 'Failed to complete sale');
+      }
+    } catch (error) {
+      addToast(error.message, 'error');
+    }
+  };
 
   // Helpers
   const getRole          = (id) => state.roles.find(r => r.id === id)
@@ -282,12 +394,16 @@ export function POSProvider({ children }) {
     if (!state.user) return false
     const role = getRole(state.user.rol_id)
     if (!role) return false
-    return role.permisos.includes('all') || role.permisos.includes(permission)
+    // This will need to be updated once roles are fetched
+    return true;
   }
 
   const getNextFolio = () => {
-    const lastVenta = state.ventas[state.ventas.length - 1]
-    return generateFolio(lastVenta?.folio)
+    if (USE_MOCK_DATA) {
+      return generateFolio(state.ventas[state.ventas.length - 1]?.folio);
+    }
+    // This will need to be updated for real data
+    return "F0001";
   }
 
   const getLowStockProducts = () =>
@@ -310,6 +426,13 @@ export function POSProvider({ children }) {
 
   const value = {
     state, dispatch,
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    completeSale,
     getRole, getCategory, getProduct, getUser, getPaymentMethod,
     hasPermission, getNextFolio, getLowStockProducts, getCartTotals, addToast
   }
