@@ -3,9 +3,9 @@ async function fetchFromAPI(endpoint, options = {}) {
   try {
     const response = await fetch(`/api/${endpoint}`, options);
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorBody = await response.json().catch(() => ({ error: 'Request failed with no error body' }));
+      throw new Error(errorBody.error || `HTTP error! status: ${response.status}`);
     }
-    // For DELETE requests, we might not get a JSON response
     if (options.method === 'DELETE') {
       return response;
     }
@@ -59,4 +59,20 @@ export const completeSale = (saleData) => fetchFromAPI('sales_add.php', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(saleData),
+});
+
+export const createUser = (userData) => fetchFromAPI('users_add.php', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(userData),
+});
+
+export const updateUser = (userId, userData) => fetchFromAPI(`users_edit.php?id=${userId}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(userData),
+});
+
+export const deleteUser = (userId) => fetchFromAPI(`users_delete.php?id=${userId}`, {
+  method: 'DELETE',
 });

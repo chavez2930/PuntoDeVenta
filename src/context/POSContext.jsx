@@ -3,7 +3,8 @@ import {
   getProducts, getSales, getCategories, getUsers, 
   createProduct, updateProduct as apiUpdateProduct, deleteProduct as apiDeleteProduct,
   createCategory, updateCategory as apiUpdateCategory, deleteCategory as apiDeleteCategory,
-  completeSale as apiCompleteSale
+  completeSale as apiCompleteSale,
+  createUser, updateUser as apiUpdateUser, deleteUser as apiDeleteUser
 } from '../utils/api';
 import { USE_MOCK_DATA } from '../config';
 import {
@@ -244,6 +245,9 @@ export function POSProvider({ children }) {
     }
   }, [state.toasts])
 
+  const addToast = (message, type = 'info') =>
+    dispatch({ type: 'ADD_TOAST', payload: { message, type } })
+
   const addProduct = async (productData) => {
     if (USE_MOCK_DATA) {
       const newProduct = { ...productData, id: Date.now(), stock_actual: productData.stock };
@@ -258,7 +262,7 @@ export function POSProvider({ children }) {
       dispatch({ type: 'UPDATE_PRODUCT', payload: { ...savedProduct, id: tempId } });
     } catch (error) {
       dispatch({ type: 'DELETE_PRODUCT', payload: tempId });
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error adding product', type: 'error' } });
+      addToast(error.message, 'error');
     }
   };
 
@@ -273,7 +277,7 @@ export function POSProvider({ children }) {
       await apiUpdateProduct(productId, productData);
     } catch (error) {
       dispatch({ type: 'UPDATE_PRODUCT', payload: originalProduct });
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error updating product', type: 'error' } });
+      addToast(error.message, 'error');
     }
   };
 
@@ -288,7 +292,7 @@ export function POSProvider({ children }) {
       await apiDeleteProduct(productId);
     } catch (error) {
       dispatch({ type: 'SET_INITIAL_DATA', payload: { ...state, productos: originalProducts } });
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error deleting product', type: 'error' } });
+      addToast(error.message, 'error');
     }
   };
 
@@ -306,7 +310,7 @@ export function POSProvider({ children }) {
       dispatch({ type: 'UPDATE_CATEGORY', payload: { ...savedCategory, id: tempId } });
     } catch (error) {
       dispatch({ type: 'DELETE_CATEGORY', payload: tempId });
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error adding category', type: 'error' } });
+      addToast(error.message, 'error');
     }
   };
 
@@ -321,7 +325,7 @@ export function POSProvider({ children }) {
       await apiUpdateCategory(categoryId, categoryData);
     } catch (error) {
       dispatch({ type: 'UPDATE_CATEGORY', payload: originalCategory });
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error updating category', type: 'error' } });
+      addToast(error.message, 'error');
     }
   };
 
@@ -336,7 +340,7 @@ export function POSProvider({ children }) {
       await apiDeleteCategory(categoryId);
     } catch (error) {
       dispatch({ type: 'SET_INITIAL_DATA', payload: { ...state, categorias: originalCategories } });
-      dispatch({ type: 'ADD_TOAST', payload: { message: 'Error deleting category', type: 'error' } });
+      addToast(error.message, 'error');
     }
   };
 
@@ -383,6 +387,54 @@ export function POSProvider({ children }) {
     }
   };
 
+  const addUser = async (userData) => {
+    if (USE_MOCK_DATA) {
+      const newUser = { ...userData, id: Date.now(), activo: true };
+      dispatch({ type: 'ADD_USER', payload: newUser });
+      return;
+    }
+    const tempId = Date.now();
+    const newUser = { ...userData, id: tempId, activo: true };
+    dispatch({ type: 'ADD_USER', payload: newUser });
+    try {
+      const savedUser = await createUser(userData);
+      dispatch({ type: 'UPDATE_USER', payload: { ...savedUser, id: tempId } });
+    } catch (error) {
+      dispatch({ type: 'DELETE_USER', payload: tempId });
+      addToast(error.message, 'error');
+    }
+  };
+
+  const updateUser = async (userId, userData) => {
+    if (USE_MOCK_DATA) {
+      dispatch({ type: 'UPDATE_USER', payload: { ...userData, id: userId } });
+      return;
+    }
+    const originalUser = state.usuarios.find(u => u.id === userId);
+    dispatch({ type: 'UPDATE_USER', payload: { ...userData, id: userId } });
+    try {
+      await apiUpdateUser(userId, userData);
+    } catch (error) {
+      dispatch({ type: 'UPDATE_USER', payload: originalUser });
+      addToast(error.message, 'error');
+    }
+  };
+
+  const deleteUser = async (userId) => {
+    if (USE_MOCK_DATA) {
+      dispatch({ type: 'DELETE_USER', payload: userId });
+      return;
+    }
+    const originalUsers = state.usuarios;
+    dispatch({ type: 'DELETE_USER', payload: userId });
+    try {
+      await apiDeleteUser(userId);
+    } catch (error) {
+      dispatch({ type: 'SET_INITIAL_DATA', payload: { ...state, usuarios: originalUsers } });
+      addToast(error.message, 'error');
+    }
+  };
+
   // Helpers
   const getRole          = (id) => state.roles.find(r => r.id === id)
   const getCategory      = (id) => state.categorias.find(c => c.id === id)
@@ -421,9 +473,6 @@ export function POSProvider({ children }) {
     return { subtotal, impuestos, descuento: state.cartDiscount, total }
   }
 
-  const addToast = (message, type = 'info') =>
-    dispatch({ type: 'ADD_TOAST', payload: { message, type } })
-
   const value = {
     state, dispatch,
     addProduct,
@@ -433,6 +482,9 @@ export function POSProvider({ children }) {
     updateCategory,
     deleteCategory,
     completeSale,
+    addUser,
+    updateUser,
+    deleteUser,
     getRole, getCategory, getProduct, getUser, getPaymentMethod,
     hasPermission, getNextFolio, getLowStockProducts, getCartTotals, addToast
   }

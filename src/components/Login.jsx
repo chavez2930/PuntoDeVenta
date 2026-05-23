@@ -16,7 +16,7 @@ function getGreeting() {
 
 export default function Login() {
   const { state, dispatch, addToast } = usePOS()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -27,10 +27,10 @@ export default function Login() {
 
   // Cargar credenciales guardadas al montar
   useEffect(() => {
-    const savedEmail = localStorage.getItem('pos-remembered-email')
+    const savedUsername = localStorage.getItem('pos-remembered-username')
     const savedRemember = localStorage.getItem('pos-remember-me') === 'true'
-    if (savedRemember && savedEmail) {
-      setEmail(savedEmail)
+    if (savedRemember && savedUsername) {
+      setUsername(savedUsername)
       setRememberMe(true)
     }
   }, [])
@@ -51,25 +51,37 @@ export default function Login() {
   }, [])
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    await new Promise(resolve => setTimeout(resolve, 800))
-    const user = state.usuarios.find(u => u.email === email && u.password === password && u.activo)
-    if (user) {
-      if (rememberMe) {
-        localStorage.setItem('pos-remembered-email', email)
-        localStorage.setItem('pos-remember-me', 'true')
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/login.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        if (rememberMe) {
+          localStorage.setItem('pos-remembered-username', username);
+          localStorage.setItem('pos-remember-me', 'true');
+        } else {
+          localStorage.removeItem('pos-remembered-username');
+          localStorage.removeItem('pos-remember-me');
+        }
+        dispatch({ type: 'LOGIN', payload: data });
+        addToast(`Bienvenido, ${data.nombre}`, 'success');
       } else {
-        localStorage.removeItem('pos-remembered-email')
-        localStorage.removeItem('pos-remember-me')
+        throw new Error(data.error || 'Credenciales incorrectas');
       }
-      dispatch({ type: 'LOGIN', payload: user })
-      addToast(`Bienvenido, ${user.nombre}`, 'success')
-    } else {
-      addToast('Credenciales incorrectas', 'error')
+    } catch (error) {
+      addToast(error.message, 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false)
-  }
+  };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4 relative overflow-hidden">
@@ -130,15 +142,15 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-2">Correo electrónico</label>
+              <label className="block text-sm font-medium text-zinc-400 mb-2">Usuario</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted" />
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   className="w-full pl-11 pr-4 py-3 bg-background border border-border rounded-xl text-white placeholder-zinc-600 focus:border-primary transition-all duration-200"
-                  placeholder="correo@ejemplo.com"
+                  placeholder="tu-usuario"
                   required
                 />
               </div>
@@ -208,15 +220,15 @@ export default function Login() {
             <div className="space-y-2 text-xs">
               <div className="flex justify-between text-zinc-400">
                 <span>Admin:</span>
-                <span className="text-zinc-300">admin@pos.com / admin123</span>
+                <span className="text-zinc-300">admin / admin123</span>
               </div>
               <div className="flex justify-between text-zinc-400">
                 <span>Cajero:</span>
-                <span className="text-zinc-300">cajero@pos.com / cajero123</span>
+                <span className="text-zinc-300">cajero / cajero123</span>
               </div>
               <div className="flex justify-between text-zinc-400">
                 <span>Supervisor:</span>
-                <span className="text-zinc-300">supervisor@pos.com / super123</span>
+                <span className="text-zinc-300">supervisor / super123</span>
               </div>
             </div>
           </div>
