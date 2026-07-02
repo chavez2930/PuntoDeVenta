@@ -33,11 +33,17 @@ const paymentIcons = {
 }
 
 export default function Configuracion() {
-  const { state, hasPermission } = usePOS()
-  const [activeTab, setActiveTab] = useState('usuarios')
-  
+  const { state, hasPermission, getRole } = usePOS()
+
   const isAdmin = hasPermission('configuracion')
-  
+
+  // Solo el Administrador ve la pestaña de Usuarios
+  const currentUserRole = getRole(state.user?.rol_id)
+  const isAdministrador = currentUserRole?.nombre === 'Administrador'
+  const visibleTabs = isAdministrador ? tabs : tabs.filter(tab => tab.id !== 'usuarios')
+
+  const [activeTab, setActiveTab] = useState(isAdministrador ? 'usuarios' : 'categorias')
+
   if (!isAdmin) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-center p-8">
@@ -58,7 +64,7 @@ export default function Configuracion() {
       
       {/* Tabs */}
       <div className="flex gap-2 overflow-x-auto pb-2">
-        {tabs.map((tab) => {
+        {visibleTabs.map((tab) => {
           const Icon = tab.icon
           return (
             <button
@@ -79,7 +85,7 @@ export default function Configuracion() {
       
       {/* Tab Content */}
       <div className="animate-fade-in">
-        {activeTab === 'usuarios' && <UsuariosTab />}
+        {activeTab === 'usuarios' && isAdministrador && <UsuariosTab />}
         {activeTab === 'categorias' && <CategoriasTab />}
         {activeTab === 'metodosPago' && <MetodosPagoTab />}
       </div>
@@ -94,6 +100,10 @@ function UsuariosTab() {
   const [editingUser, setEditingUser] = useState(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(null)
   const [loading, setLoading] = useState(false)
+
+  // Solo el Administrador puede agregar usuarios nuevos
+  const currentUserRole = getRole(state.user?.rol_id)
+  const canAddUsers = currentUserRole?.nombre === 'Administrador'
   
   const handleSave = async (userData) => {
     setLoading(true)
@@ -125,13 +135,15 @@ function UsuariosTab() {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <p className="text-muted">{state.usuarios.length} usuarios registrados</p>
-        <button
-          onClick={() => { setEditingUser(null); setShowModal(true) }}
-          className="btn-gradient px-4 py-2 rounded-xl text-white font-medium flex items-center gap-2"
-        >
-          <Plus className="w-5 h-5" />
-          Nuevo Usuario
-        </button>
+        {canAddUsers && (
+          <button
+            onClick={() => { setEditingUser(null); setShowModal(true) }}
+            className="btn-gradient px-4 py-2 rounded-xl text-white font-medium flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Nuevo Usuario
+          </button>
+        )}
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -206,11 +218,14 @@ function UsuariosTab() {
 
 // User Modal
 function UserModal({ user, roles, onClose, onSave, loading }) {
+  // Solo se permite asignar Administrador o Cajero
+  const visibleRoles = roles.filter(role => role.nombre !== 'Supervisor')
+
   const [formData, setFormData] = useState({
     nombre: user?.nombre || '',
     email: user?.email || '',
     password: user?.password || '',
-    rol_id: user?.rol_id || roles[0]?.id || 1,
+    rol_id: user?.rol_id || visibleRoles[0]?.id || 1,
     activo: user?.activo ?? true,
     avatar: user?.avatar || ''
   })
@@ -276,7 +291,7 @@ function UserModal({ user, roles, onClose, onSave, loading }) {
               onChange={(e) => setFormData({ ...formData, rol_id: e.target.value })}
               className="w-full px-4 py-3 bg-surface border border-border rounded-xl text-white focus:border-primary transition-colors cursor-pointer"
             >
-              {roles.map((role) => (
+              {visibleRoles.map((role) => (
                 <option key={role.id} value={role.id}>{role.nombre}</option>
               ))}
             </select>

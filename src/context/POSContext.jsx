@@ -1,6 +1,6 @@
 import { createContext, useContext, useReducer, useEffect } from 'react'
 import { 
-  getProducts, getSales, getCategories, getUsers, 
+  getProducts, getSales, getCategories, getUsers, getRoles,
   createProduct, updateProduct as apiUpdateProduct, deleteProduct as apiDeleteProduct,
   createCategory, updateCategory as apiUpdateCategory, deleteCategory as apiDeleteCategory,
   completeSale as apiCompleteSale,
@@ -21,6 +21,12 @@ import {
 } from '../data/mockData';
 
 const POSContext = createContext(null)
+
+// Permisos por nombre de rol. Solo existen Administrador y Cajero.
+const ROLE_PERMISSIONS = {
+  'Administrador': ['caja', 'dashboard', 'productos', 'historial', 'inventario', 'reportes', 'configuracion'],
+  'Cajero':        ['caja', 'historial', 'productos', 'configuracion'],
+}
 
 const initialState = {
   // Auth
@@ -118,6 +124,30 @@ function posReducer(state, action) {
         }]
       }
     }
+    // Vender "por importe": el usuario da un monto en pesos y la cantidad se calcula sola
+    case 'ADD_TO_CART_BY_AMOUNT': {
+      const { product, cantidad } = action.payload
+      const existingIndex = state.cart.findIndex(item => item.producto_id === product.id)
+      if (existingIndex >= 0) {
+        const newCart = [...state.cart]
+        newCart[existingIndex] = {
+          ...newCart[existingIndex],
+          cantidad: newCart[existingIndex].cantidad + cantidad
+        }
+        return { ...state, cart: newCart }
+      }
+      return {
+        ...state,
+        cart: [...state.cart, {
+          producto_id: product.id,
+          nombre: product.nombre,
+          precio_unitario: product.precio_venta,
+          impuesto_pct: product.impuesto_pct,
+          cantidad,
+          descuento: 0
+        }]
+      }
+    }
     case 'UPDATE_CART_ITEM': {
       const newCart = state.cart.map((item, index) =>
         index === action.payload.index ? { ...item, ...action.payload.updates } : item
@@ -181,6 +211,8 @@ function posReducer(state, action) {
     // UI
     case 'SET_LOADING':
       return { ...state, loading: action.payload }
+    case 'REFRESH_PRODUCTS_AND_SALES':
+      return { ...state, productos: action.payload.products, ventas: action.payload.sales }
     case 'ADD_TOAST':
       return { ...state, toasts: [...state.toasts, { ...action.payload, id: Date.now() }] }
     case 'REMOVE_TOAST':
@@ -219,13 +251,14 @@ export function POSProvider({ children }) {
       }
 
       try {
-        const [products, sales, categories, users] = await Promise.all([
+        const [products, sales, categories, users, roles] = await Promise.all([
           getProducts(),
           getSales(),
           getCategories(),
           getUsers(),
+          getRoles(),
         ]);
-        dispatch({ type: 'SET_INITIAL_DATA', payload: { products, sales, categories, users, roles: [], paymentMethods: [], saleDetails: [], salePayments: [], inventoryMovements: [] } });
+        dispatch({ type: 'SET_INITIAL_DATA', payload: { products, sales, categories, users, roles, paymentMethods: [], saleDetails: [], salePayments: [], inventoryMovements: [] } });
       } catch (error) {
         dispatch({ type: 'ADD_TOAST', payload: { message: 'Error fetching initial data', type: 'error' } });
         dispatch({ type: 'SET_LOADING', payload: false });
@@ -367,23 +400,25 @@ export function POSProvider({ children }) {
         return p;
       });
       dispatch({ type: 'SALE_SUCCESS', payload: { newSale, updatedProducts } });
-      addToast('Sale completed successfully!', 'success');
-      return;
+      addToast('Venta completada exitosamente', 'success');
+      return { success: true, saleId: newSale.id, folio: newSale.folio };
     }
 
     try {
       const result = await apiCompleteSale(saleData);
       if (result.success) {
-        // Refetch products and sales to get the latest data
+        // Refetch products (para reflejar el stock actualizado) y ventas, sin borrar el resto del estado
         const [products, sales] = await Promise.all([getProducts(), getSales()]);
-        dispatch({ type: 'SET_INITIAL_DATA', payload: { ...state, products, sales } });
+        dispatch({ type: 'REFRESH_PRODUCTS_AND_SALES', payload: { products, sales } });
         dispatch({ type: 'CLEAR_CART' });
-        addToast('Sale completed successfully!', 'success');
+        addToast('Venta completada exitosamente', 'success');
+        return { success: true, saleId: result.sale_id };
       } else {
         throw new Error(result.error || 'Failed to complete sale');
       }
     } catch (error) {
       addToast(error.message, 'error');
+      return { success: false };
     }
   };
 
@@ -446,8 +481,7 @@ export function POSProvider({ children }) {
     if (!state.user) return false
     const role = getRole(state.user.rol_id)
     if (!role) return false
-    // This will need to be updated once roles are fetched
-    return true;
+    return ROLE_PERMISSIONS[role.nombre]?.includes(permission) ?? false
   }
 
   const getNextFolio = () => {
@@ -465,12 +499,9 @@ export function POSProvider({ children }) {
     const subtotal = state.cart.reduce((sum, item) => {
       return sum + (item.precio_unitario * item.cantidad) - item.descuento
     }, 0)
-    const impuestos = state.cart.reduce((sum, item) => {
-      const base = (item.precio_unitario * item.cantidad) - item.descuento
-      return sum + base * (item.impuesto_pct / 100)
-    }, 0)
-    const total = subtotal + impuestos - state.cartDiscount
-    return { subtotal, impuestos, descuento: state.cartDiscount, total }
+    const impuestos = 0
+    const total = subtotal
+    return { subtotal, impuestos, descuento: 0, total }
   }
 
   const value = {

@@ -21,6 +21,7 @@ export const getProducts = () => fetchFromAPI('products.php');
 export const getCategories = () => fetchFromAPI('categories.php');
 export const getUsers = () => fetchFromAPI('users.php');
 export const getSales = () => fetchFromAPI('sales_view.php');
+export const getRoles = () => fetchFromAPI('roles.php');
 
 // Functions for CRUD operations
 export const createProduct = (productData) => fetchFromAPI('products_add.php', {

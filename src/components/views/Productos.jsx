@@ -12,6 +12,14 @@ import {
   AlertCircle
 } from 'lucide-react'
 
+// Muestra el stock como pieza entera ("45") o con decimales cuando es a granel ("35.500 kg")
+function formatStock(product) {
+  if (product.unidad_medida === 'pza') {
+    return `${Math.round(product.stock)}`
+  }
+  return `${Number(product.stock).toFixed(3)} ${product.unidad_medida}`
+}
+
 export default function Productos() {
   const { state, dispatch, getCategory, addToast } = usePOS()
   const [search, setSearch] = useState('')
@@ -153,7 +161,14 @@ export default function Productos() {
                             {category?.emoji}
                           </div>
                           <div>
-                            <p className="font-medium text-white">{product.nombre}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-white">{product.nombre}</p>
+                              {product.peso_variable && (
+                                <span className="px-1.5 py-0.5 bg-accent/15 text-accent rounded text-[10px] font-semibold uppercase tracking-wide">
+                                  Por peso
+                                </span>
+                              )}
+                            </div>
                             <p className="text-sm text-muted md:hidden">{product.sku}</p>
                           </div>
                         </div>
@@ -175,7 +190,7 @@ export default function Productos() {
                               ? 'bg-warning/20 text-warning'
                               : 'bg-success/20 text-success'
                         }`}>
-                          {product.stock}
+                          {formatStock(product)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-center">
@@ -274,10 +289,10 @@ function ProductModal({ product, categories, onClose, onSave, loading }) {
     sku: product?.sku || '',
     precio_compra: product?.precio_compra || '',
     precio_venta: product?.precio_venta || '',
-    impuesto_pct: product?.impuesto_pct || 16,
     stock: product?.stock || 0,
     stock_minimo: product?.stock_minimo || 5,
     unidad_medida: product?.unidad_medida || 'pza',
+    peso_variable: product?.peso_variable ?? false,
     activo: product?.activo ?? true
   })
   
@@ -288,9 +303,9 @@ function ProductModal({ product, categories, onClose, onSave, loading }) {
       categoria_id: parseInt(formData.categoria_id),
       precio_compra: parseFloat(formData.precio_compra),
       precio_venta: parseFloat(formData.precio_venta),
-      impuesto_pct: parseFloat(formData.impuesto_pct),
       stock: parseInt(formData.stock),
-      stock_minimo: parseInt(formData.stock_minimo)
+      stock_minimo: parseInt(formData.stock_minimo),
+      peso_variable: Boolean(formData.peso_variable)
     })
   }
   
@@ -408,18 +423,6 @@ function ProductModal({ product, categories, onClose, onSave, loading }) {
               />
             </div>
             
-            {/* Impuesto */}
-            <div>
-              <label className="block text-sm font-medium text-zinc-400 mb-2">Impuesto (%)</label>
-              <input
-                type="number"
-                value={formData.impuesto_pct}
-                onChange={(e) => setFormData({ ...formData, impuesto_pct: e.target.value })}
-                className="w-full px-4 py-3 bg-surface border border-border rounded-xl text-white placeholder-muted focus:border-primary transition-colors"
-                required
-              />
-            </div>
-            
             {/* Stock */}
             <div>
               <label className="block text-sm font-medium text-zinc-400 mb-2">Stock</label>
@@ -444,6 +447,20 @@ function ProductModal({ product, categories, onClose, onSave, loading }) {
               />
             </div>
             
+            {/* Venta por importe / peso */}
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.peso_variable}
+                  onChange={(e) => setFormData({ ...formData, peso_variable: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-surface-light rounded-full peer peer-checked:bg-primary after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
+              </label>
+              <span className="text-sm text-zinc-400">Permitir vender por importe / peso (ej. "$20 de este producto")</span>
+            </div>
+
             {/* Activo */}
             <div className="flex items-center gap-3">
               <label className="relative inline-flex items-center cursor-pointer">

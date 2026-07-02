@@ -16,7 +16,8 @@ import {
   Wallet,
   ArrowLeftRight,
   Ticket,
-  Package
+  Package,
+  DollarSign
 } from 'lucide-react'
 
 // Payment icons map
@@ -325,7 +326,6 @@ function generarTicketHTML({ sale, productos }) {
   <div class="totals">
     <div class="total-row"><span>Subtotal</span><span class="val">${formatCurrency(sale.subtotal)}</span></div>
     ${sale.descuento > 0 ? `<div class="total-row"><span>Descuento</span><span class="disc">-${formatCurrency(sale.descuento)}</span></div>` : ''}
-    <div class="total-row"><span>IVA</span><span class="val">${formatCurrency(sale.impuestos)}</span></div>
   </div>
 
   <div class="grand-total">
@@ -361,13 +361,22 @@ function generarTicketHTML({ sale, productos }) {
 </body>
 </html>`
 }
+// Muestra el stock como pieza entera ("45 pzs") o con decimales cuando es a granel ("35.500 kg")
+function formatStock(product) {
+  if (product.unidad_medida === 'pza') {
+    return `${Math.round(product.stock)} pzs`
+  }
+  return `${Number(product.stock).toFixed(3)} ${product.unidad_medida}`
+}
+
 export default function Caja() {
-  const { state, dispatch, getCategory, getNextFolio, getCartTotals, addToast } = usePOS()
+  const { state, dispatch, getCategory, getNextFolio, getCartTotals, addToast, completeSale } = usePOS()
   const [search, setSearch] = useState('')
   const [selectedCategory, setSelectedCategory] = useState(null)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
   const [completedSale, setCompletedSale] = useState(null)
+  const [amountModalProduct, setAmountModalProduct] = useState(null)
   const searchRef = useRef(null)
   
   // Filter products
@@ -412,7 +421,27 @@ export default function Caja() {
     
     dispatch({ type: 'ADD_TO_CART', payload: product })
   }
-  
+
+  // Vender por importe o por peso: el modal ya entrega la cantidad calculada (en la unidad del producto)
+  const handleAddByAmount = (product, cantidad) => {
+    if (!cantidad || cantidad <= 0) {
+      addToast('Ingresa un valor válido', 'error')
+      return
+    }
+
+    const existingItem = state.cart.find(item => item.producto_id === product.id)
+    const cantidadTotal = (existingItem?.cantidad || 0) + cantidad
+
+    if (cantidadTotal > product.stock) {
+      addToast('Stock insuficiente para esa cantidad', 'error')
+      return
+    }
+
+    dispatch({ type: 'ADD_TO_CART_BY_AMOUNT', payload: { product, cantidad } })
+    addToast(`Se agregaron ${cantidad.toFixed(3)} ${product.unidad_medida} de ${product.nombre}`, 'success')
+    setAmountModalProduct(null)
+  }
+
   const handleUpdateQuantity = (index, delta) => {
     const item = state.cart[index]
     const product = state.productos.find(p => p.id === item.producto_id)
@@ -435,11 +464,12 @@ export default function Caja() {
     dispatch({ type: 'UPDATE_CART_ITEM', payload: { index, updates: { descuento: parseFloat(discount) || 0 } } })
   }
   
-  const handleCompleteSale = (payments) => {
+  const handleCompleteSale = async (payments) => {
     const folio = getNextFolio()
     const now = new Date().toISOString()
-    
-    const sale = {
+
+    // Datos para mostrar el ticket/modal de éxito (independiente de si es mock o real)
+    const saleForReceipt = {
       folio,
       fecha: now,
       usuario_id: state.user.id,
@@ -449,7 +479,7 @@ export default function Caja() {
       total: cartTotals.total,
       estado: 'completada'
     }
-    
+
     const details = state.cart.map(item => ({
       producto_id: item.producto_id,
       cantidad: item.cantidad,
@@ -457,30 +487,28 @@ export default function Caja() {
       descuento: item.descuento,
       subtotal: (item.precio_unitario * item.cantidad) - item.descuento
     }))
-    
-    const stockUpdates = state.cart.map(item => ({
-      producto_id: item.producto_id,
-      cantidad: item.cantidad
-    }))
-    
-    const movements = state.cart.map(item => ({
-      producto_id: item.producto_id,
-      tipo: 'salida_venta',
-      cantidad: -item.cantidad,
-      fecha: now,
-      usuario_id: state.user.id,
-      notas: `Venta ${folio}`
-    }))
-    
-    dispatch({
-      type: 'COMPLETE_SALE',
-      payload: { sale, details, payments, stockUpdates, movements }
+
+    // Esto sí persiste la venta: en mock actualiza el estado local,
+    // en real llama a sales_add.php y refresca productos/ventas
+    const result = await completeSale({
+      cart: state.cart,
+      cartDiscount: 0,
+      user: state.user,
+      getCartTotals,
+      getNextFolio,
+      user_id: state.user.id,
+      payments,
+      discount: 0
     })
-    
-    setCompletedSale({ ...sale, details, payments })
+
+    if (!result?.success) {
+      // completeSale ya mostró el toast de error; no cerramos el modal de pago
+      return
+    }
+
+    setCompletedSale({ ...saleForReceipt, folio: result.folio || folio, details, payments })
     setShowPaymentModal(false)
     setShowSuccessModal(true)
-    addToast('Venta completada exitosamente', 'success')
   }
   
   return (
@@ -592,17 +620,38 @@ export default function Caja() {
                           <div className={`w-1.5 h-1.5 rounded-full ${
                             isOutOfStock ? 'bg-danger' : isLowStock ? 'bg-warning animate-pulse' : 'bg-success'
                           }`} />
-                          {isOutOfStock ? 'Agotado' : `${product.stock} pzs`}
+                          {isOutOfStock ? 'Agotado' : formatStock(product)}
                         </div>
                       </div>
                       <div className="shrink-0 text-right w-24">
                         <p className={`text-lg font-bold ${isOutOfStock ? 'text-zinc-500' : 'text-white'}`}>
                           {formatCurrency(product.precio_venta)}
                         </p>
-                        {product.impuesto_pct > 0 && (
-                          <p className="text-xs text-muted">+{product.impuesto_pct}% IVA</p>
-                        )}
                       </div>
+                      {product.peso_variable && (
+                        <div
+                          role="button"
+                          tabIndex={isOutOfStock ? -1 : 0}
+                          title="Vender por importe o peso"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (!isOutOfStock) setAmountModalProduct(product)
+                          }}
+                          onKeyDown={(e) => {
+                            if ((e.key === 'Enter' || e.key === ' ') && !isOutOfStock) {
+                              e.stopPropagation()
+                              setAmountModalProduct(product)
+                            }
+                          }}
+                          className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                            isOutOfStock
+                              ? 'bg-surface text-zinc-600 cursor-not-allowed'
+                              : 'bg-accent/10 text-accent hover:bg-accent hover:text-white'
+                          }`}
+                        >
+                          <DollarSign className="w-4 h-4" />
+                        </div>
+                      )}
                       <div className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center transition-all duration-200 ${
                         isOutOfStock
                           ? 'bg-surface text-zinc-600'
@@ -668,7 +717,9 @@ export default function Caja() {
                     >
                       <Minus className="w-3 h-3" />
                     </button>
-                    <span className="w-8 text-center text-white font-medium text-sm">{item.cantidad}</span>
+                    <span className="w-8 text-center text-white font-medium text-sm">
+                      {Number.isInteger(item.cantidad) ? item.cantidad : item.cantidad.toFixed(3)}
+                    </span>
                     <button
                       onClick={() => handleUpdateQuantity(index, 1)}
                       className="w-7 h-7 rounded-lg bg-surface border border-border text-zinc-400 hover:text-white hover:border-primary flex items-center justify-center transition-all duration-200"
@@ -698,35 +749,11 @@ export default function Caja() {
         </div>
         
         <div className="border-t border-border">
-          <div className="px-4 py-3 flex items-center justify-between border-b border-border">
-            <span className="text-sm text-zinc-400">Descuento global</span>
-            <div className="flex items-center gap-2">
-              <span className="text-muted">$</span>
-              <input
-                type="number"
-                value={state.cartDiscount || ''}
-                onChange={(e) => dispatch({ type: 'SET_CART_DISCOUNT', payload: parseFloat(e.target.value) || 0 })}
-                placeholder="0.00"
-                className="w-20 px-2 py-1 bg-surface border border-border rounded-lg text-white text-right focus:border-primary transition-colors"
-              />
-            </div>
-          </div>
-          
           <div className="px-4 py-3 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-zinc-400">Subtotal</span>
               <span className="text-white">{formatCurrency(cartTotals.subtotal)}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-zinc-400">Impuestos</span>
-              <span className="text-white">{formatCurrency(cartTotals.impuestos)}</span>
-            </div>
-            {cartTotals.descuento > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-zinc-400">Descuento</span>
-                <span className="text-success">-{formatCurrency(cartTotals.descuento)}</span>
-              </div>
-            )}
             <div className="flex justify-between pt-2 border-t border-border">
               <span className="text-lg font-semibold text-white">Total</span>
               <span className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
@@ -767,6 +794,160 @@ export default function Caja() {
           }}
         />
       )}
+
+      {amountModalProduct && (
+        <AmountModal
+          product={amountModalProduct}
+          onClose={() => setAmountModalProduct(null)}
+          onConfirm={(cantidad) => handleAddByAmount(amountModalProduct, cantidad)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Amount Modal (vender por importe o por peso) ─────────────────────────────
+function AmountModal({ product, onClose, onConfirm }) {
+  // Para productos en 'kg' la sub-unidad es gramos; para 'lt' es mililitros.
+  // Factor de conversión: 1 kg = 1000 g, 1 lt = 1000 ml
+  const subUnitLabel = product.unidad_medida === 'lt' ? 'mililitros (ml)' : 'gramos (g)'
+  const factor = 1000
+
+  const [mode, setMode] = useState('pesos') // 'pesos' | 'peso'
+  const [value, setValue] = useState('')
+
+  const inputValue = parseFloat(value) || 0
+
+  // cantidad siempre en la unidad base del producto (kg o lt), que es como se maneja el stock
+  const cantidad = mode === 'pesos'
+    ? (product.precio_venta > 0 ? inputValue / product.precio_venta : 0)
+    : inputValue / factor
+
+  const gramosEquivalentes = cantidad * factor
+  const importeEquivalente = cantidad * product.precio_venta
+
+  const excedeStock = cantidad > product.stock
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (!excedeStock && cantidad > 0) onConfirm(cantidad)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-sm glass rounded-2xl shadow-2xl animate-scale-in overflow-hidden">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Vender por importe o peso</h2>
+          <button onClick={onClose} className="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-surface-light transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <p className="text-white font-medium">{product.nombre}</p>
+            <p className="text-sm text-muted">
+              {formatCurrency(product.precio_venta)} por {product.unidad_medida} · Stock: {formatStock(product)}
+            </p>
+          </div>
+
+          {/* Selector de modo */}
+          <div className="flex gap-2 p-1 bg-surface rounded-xl border border-border">
+            <button
+              type="button"
+              onClick={() => { setMode('pesos'); setValue('') }}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                mode === 'pesos' ? 'bg-primary text-white' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Por pesos ($)
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('peso'); setValue('') }}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
+                mode === 'peso' ? 'bg-primary text-white' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Por peso ({product.unidad_medida === 'lt' ? 'ml' : 'g'})
+            </button>
+          </div>
+
+          {mode === 'pesos' ? (
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-2">¿Cuántos pesos quiere el cliente?</label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted text-lg">$</span>
+                <input
+                  autoFocus
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full pl-8 pr-4 py-3 bg-surface border border-border rounded-xl text-white text-xl font-semibold focus:border-primary transition-colors"
+                />
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-zinc-400 mb-2">
+                ¿Cuántos {subUnitLabel} quiere el cliente?
+              </label>
+              <div className="relative">
+                <input
+                  autoFocus
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  placeholder="0"
+                  className="w-full pl-4 pr-16 py-3 bg-surface border border-border rounded-xl text-white text-xl font-semibold focus:border-primary transition-colors"
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-muted text-sm">
+                  {product.unidad_medida === 'lt' ? 'ml' : 'g'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {inputValue > 0 && (
+            <div className={`p-3 rounded-xl text-center space-y-1 ${excedeStock ? 'bg-danger/10 border border-danger/20' : 'bg-primary/10 border border-primary/20'}`}>
+              {excedeStock ? (
+                <p className="text-sm text-danger">Stock insuficiente para esa cantidad</p>
+              ) : mode === 'pesos' ? (
+                <p className="text-sm text-zinc-300">
+                  Equivale a <span className="font-semibold text-white">{gramosEquivalentes.toFixed(0)} {product.unidad_medida === 'lt' ? 'ml' : 'g'}</span>
+                  {' '}({cantidad.toFixed(3)} {product.unidad_medida})
+                </p>
+              ) : (
+                <p className="text-sm text-zinc-300">
+                  Equivale a <span className="font-semibold text-white">{formatCurrency(importeEquivalente)}</span>
+                  {' '}({cantidad.toFixed(3)} {product.unidad_medida})
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 bg-surface-light border border-border rounded-xl text-white font-medium hover:bg-surface transition-colors">
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={inputValue <= 0 || excedeStock}
+              className="flex-1 py-2.5 btn-gradient rounded-xl text-white font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4" />
+              Agregar
+            </button>
+          </div>
+
+        </form>
+      </div>
     </div>
   )
 }
@@ -775,20 +956,27 @@ export default function Caja() {
 function PaymentModal({ total, onClose, onComplete, metodosPago }) {
   const [selectedMethod, setSelectedMethod] = useState(null)
   const [cashReceived, setCashReceived]     = useState('')
+  const [isProcessing, setIsProcessing]     = useState(false)
 
   const isEfectivo = selectedMethod?.tipo === 'efectivo'
   const change     = isEfectivo && cashReceived ? parseFloat(cashReceived) - total : 0
   const canComplete = selectedMethod !== null && (!isEfectivo || parseFloat(cashReceived) >= total)
 
-  const handleComplete = () => {
-    onComplete([{
-      metodo_id:     selectedMethod.id,
-      metodo_pago_id: selectedMethod.id,
-      metodo_nombre:  selectedMethod.nombre,
-      metodo_tipo:    selectedMethod.tipo,
-      monto:          total,
-      efectivo_recibido: isEfectivo ? parseFloat(cashReceived) : null
-    }])
+  const handleComplete = async () => {
+    if (isProcessing) return
+    setIsProcessing(true)
+    try {
+      await onComplete([{
+        metodo_id:     selectedMethod.id,
+        metodo_pago_id: selectedMethod.id,
+        metodo_nombre:  selectedMethod.nombre,
+        metodo_tipo:    selectedMethod.tipo,
+        monto:          total,
+        efectivo_recibido: isEfectivo ? parseFloat(cashReceived) : null
+      }])
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
   return (
@@ -873,10 +1061,10 @@ function PaymentModal({ total, onClose, onComplete, metodosPago }) {
           </button>
           <button
             onClick={handleComplete}
-            disabled={!canComplete}
+            disabled={!canComplete || isProcessing}
             className="flex-1 py-3 btn-gradient rounded-xl text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Completar Venta
+            {isProcessing ? 'Procesando...' : 'Completar Venta'}
           </button>
         </div>
       </div>
@@ -921,10 +1109,6 @@ function SuccessModal({ sale, productos, onClose }) {
             <div className="flex justify-between text-sm">
               <span className="text-zinc-400">Subtotal</span>
               <span className="text-white">{formatCurrency(sale.subtotal)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-zinc-400">Impuestos</span>
-              <span className="text-white">{formatCurrency(sale.impuestos)}</span>
             </div>
             {sale.descuento > 0 && (
               <div className="flex justify-between text-sm">
